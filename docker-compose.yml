@@ -1,0 +1,412 @@
+version: '3.8'
+
+# 网络配置 - 允许所有服务在同一网络中通信
+networks:
+  hadoop-network:
+    driver: bridge
+
+# 数据卷配置 - 持久化存储
+volumes:
+  mysql-data:
+    driver: local
+  redis-data:
+    driver: local
+  namenode-data:
+    driver: local
+  datanode-data:
+    driver: local
+  hive-metastore-data:
+    driver: local
+  spark-logs:
+    driver: local
+  airflow-db:
+    driver: local
+  airflow-logs:
+    driver: local
+  airflow-dags:
+    driver: local
+  crawler-data:
+    driver: local
+
+services:
+  # ========================================
+  # 基础服务
+  # ========================================
+
+  # MySQL 数据库服务
+  mysql:
+    image: mysql:8.0
+    container_name: agriculture-mysql
+    networks:
+      - hadoop-network
+    environment:
+      MYSQL_ROOT_PASSWORD: Root123!
+      MYSQL_DATABASE: agriculture
+      MYSQL_USER: hive
+      MYSQL_PASSWORD: hive123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./backend/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./hadoop/hive/scripts/init_tables.sql:/docker-entrypoint-initdb.d/hive_tables.sql:ro
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+
+  # Redis 缓存服务
+  redis:
+    image: redis:7-alpine
+    container_name: agriculture-redis
+    networks:
+      - hadoop-network
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass Redis123! --appendonly yes
+    volumes:
+      - redis-data:/data
+
+  # ========================================
+  # Hadoop 生态服务
+  # ========================================
+
+  # Hadoop NameNode
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: agriculture-namenode
+    networks:
+      - hadoop-network
+    environment:
+      - CLUSTER_NAME=agriculture
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_proxyuser_root_groups=*
+      - CORE_CONF_hadoop_proxyuser_root_hosts=*
+      - HDFS_CONF_dfs_replication=1
+      - HDFS_CONF_dfs_namenode_name_dir=/hadoop/dfs/name
+      - HDFS_CONF_dfs_datanode_data_dir=/hadoop/dfs/data
+    ports:
+      - "9000:9000"
+      - "9870:9870"
+    volumes:
+      - namenode-data:/hadoop/dfs/name
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Hadoop DataNode
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: agriculture-datanode
+    networks:
+      - hadoop-network
+    environment:
+      - CLUSTER_NAME=agriculture
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_proxyuser_root_groups=*
+      - CORE_CONF_hadoop_proxyuser_root_hosts=*
+    ports:
+      - "9864:9864"
+      - "9866:9866"
+    volumes:
+      - datanode-data:/hadoop/dfs/data
+    depends_on:
+      namenode:
+        condition: service_healthy
+
+  # Hive Metastore
+  hive-metastore:
+    image: bde2020/hive-metastore-postgresql:2.3.2
+    container_name: agriculture-hive-metastore
+    networks:
+      - hadoop-network
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HIVE_SITE_conf_javax_jdo_option_ConnectionURL=jdbc:mysql://mysql:3306/hive?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC
+      - HIVE_SITE_conf_javax_jdo_option_ConnectionDriverName=com.mysql.cj.jdbc.Driver
+      - HIVE_SITE_conf_javax_jdo_option_ConnectionUserName=hive
+      - HIVE_SITE_conf_javax_jdo_option_ConnectionPassword=hive123
+      - HIVE_SITE_conf_hive_metastore_warehouse_dir=/user/hive/warehouse
+      - HIVE_SITE_conf_hive_exec_dynamic_partition=true
+      - HIVE_SITE_conf_hive_exec_dynamic_partition_mode=nonstrict
+      - HIVE_SITE_conf_hive_exec_parallel=true
+      - HIVE_SITE_conf_hive_server2_thrift_port=10000
+      - HIVE_SITE_conf_hive_server2_webui_port=10002
+    ports:
+      - "9083:9083"
+    volumes:
+      - hive-metastore-data:/var/lib/hive
+      - ./hadoop/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    depends_on:
+      - mysql
+      - namenode
+    command: /opt/hive/bin/hive --service metastore
+
+  # Hive Server
+  hive-server:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: agriculture-hive-server
+    networks:
+      - hadoop-network
+    environment:
+      - HIVE_SERVER2_THRIFT_PORT=10000
+      - HIVE_SERVER2_THRIFT_BIND_HOST=0.0.0.0
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    volumes:
+      - ./hadoop/hive/hive-site.xml:/opt/hive/conf/hive-site.xml:ro
+    depends_on:
+      - hive-metastore
+    command: /opt/hive/bin/hive --service hiveserver2
+
+  # Spark Master
+  spark-master:
+    image: bde2020/spark-master:3.3.2-hadoop3
+    container_name: agriculture-spark-master
+    networks:
+      - hadoop-network
+    environment:
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+      - SPARK_SUBMIT_OPTS=-Dhadoop.home.dir=/opt/hadoop
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    volumes:
+      - spark-logs:/opt/spark/logs
+      - ./hadoop/spark/jobs:/app/spark/jobs:ro
+    command: /bin/bash -c "/opt/spark/sbin/start-master.sh && tail -f /dev/null"
+
+  # Spark Worker
+  spark-worker:
+    image: bde2020/spark-worker:3.3.2-hadoop3
+    container_name: agriculture-spark-worker
+    networks:
+      - hadoop-network
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_PORT=8881
+      - HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop
+    ports:
+      - "8881:8881"
+      - "8042:8042"
+    volumes:
+      - spark-logs:/opt/spark/logs
+      - ./hadoop/spark/jobs:/app/spark/jobs:ro
+    depends_on:
+      - spark-master
+    command: /bin/bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 && tail -f /dev/null"
+
+  # Airflow - 初始化数据库
+  airflow-init:
+    image: apache/airflow:2.7.3-python3.10
+    container_name: agriculture-airflow-init
+    networks:
+      - hadoop-network
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+    volumes:
+      - airflow-dags:/opt/airflow/dags
+      - ./hadoop/airflow/dags:/opt/airflow/dags:ro
+    depends_on:
+      - postgres
+    command: >
+      bash -c "
+        airflow db init &&
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com \
+          --password admin
+      "
+
+  # PostgreSQL for Airflow
+  postgres:
+    image: postgres:14
+    container_name: agriculture-postgres
+    networks:
+      - hadoop-network
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - airflow-db:/var/lib/postgresql/data
+
+  # Airflow Webserver
+  airflow-webserver:
+    image: apache/airflow:2.7.3-python3.10
+    container_name: agriculture-airflow-webserver
+    networks:
+      - hadoop-network
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    volumes:
+      - airflow-dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - ./hadoop/airflow/dags:/opt/airflow/dags:ro
+      - ./hadoop/airflow/config:/opt/airflow/config:ro
+    command: webserver
+    depends_on:
+      - postgres
+      - airflow-init
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    image: apache/airflow:2.7.3-python3.10
+    container_name: agriculture-airflow-scheduler
+    networks:
+      - hadoop-network
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__SECRET_KEY=your-secret-key-here
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+    volumes:
+      - airflow-dags:/opt/airflow/dags
+      - airflow-logs:/opt/airflow/logs
+      - ./hadoop/airflow/dags:/opt/airflow/dags:ro
+      - ./hadoop/airflow/config:/opt/airflow/config:ro
+      # 挂载爬虫和 Spark 作业目录供 Airflow 调用
+      - ./crawler/scrapy_crawler:/app/crawler/scrapy_crawler:ro
+      - ./hadoop/spark/jobs:/app/spark/jobs:ro
+    command: scheduler
+    depends_on:
+      - postgres
+      - airflow-init
+
+  # ========================================
+  # 爬虫服务
+  # ========================================
+
+  # Scrapy Crawler Service
+  crawler:
+    build:
+      context: ./crawler/scrapy_crawler
+      dockerfile: Dockerfile
+    container_name: agriculture-crawler
+    networks:
+      - hadoop-network
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - HDFS_URL=hdfs://namenode:9000
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_DATABASE=agriculture
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=Root123!
+    volumes:
+      - crawler-data:/app/data
+      - ./crawler/scrapy_crawler:/app/scrapy_crawler:ro
+      - ./crawler/config:/app/config:ro
+      - ./data:/app/output
+    depends_on:
+      - mysql
+      - namenode
+    command: >
+      bash -c "
+        echo 'Waiting for MySQL...' &&
+        until nc -z mysql 3306; do sleep 1; done &&
+        echo 'MySQL ready!' &&
+        echo 'Waiting for HDFS...' &&
+        until nc -z namenode 9000; do sleep 1; done &&
+        echo 'HDFS ready!' &&
+        echo 'Crawler service ready to receive commands'
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "ls /app/data || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ========================================
+  # 后端服务
+  # ========================================
+
+  # Spring Boot Backend API
+  backend:
+    build:
+      context: ./backend/spring-boot-api
+      dockerfile: Dockerfile
+    container_name: agriculture-backend
+    networks:
+      - hadoop-network
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/agriculture?useSSL=false&serverTimezone=UTC
+      - SPRING_DATASOURCE_USERNAME=root
+      - SPRING_DATASOURCE_PASSWORD=Root123!
+      - SPRING_REDIS_HOST=redis
+      - SPRING_REDIS_PORT=6379
+      - SPRING_REDIS_PASSWORD=Redis123!
+      - SPRING_HIVE_HOST=hive-server
+      - SPRING_HIVE_PORT=10000
+      - HDFS_URL=hdfs://namenode:9000
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ========================================
+  # 前端服务
+  # ========================================
+
+  # Vue3 Frontend Web
+  frontend:
+    build:
+      context: ./frontend/vue3-web
+      dockerfile: Dockerfile
+    container_name: agriculture-frontend
+    networks:
+      - hadoop-network
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/vue3-web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 5

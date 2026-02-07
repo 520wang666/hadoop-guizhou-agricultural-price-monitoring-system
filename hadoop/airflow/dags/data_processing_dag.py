@@ -33,11 +33,11 @@ dag = DAG(
 # 每日价格汇总任务
 daily_summary = SparkSubmitOperator(
     task_id='daily_summary',
-    application='/path/to/hadoop/spark/jobs/price_analysis.py',
+    application='/app/spark/jobs/price_analysis.py',
     application_args=['daily', '{{ ds }}'],
     conn_id='spark_default',
     conf={
-        'spark.master': 'yarn',
+        'spark.master': 'spark://spark-master:7077',
         'spark.executor.memory': '2g',
         'spark.driver.memory': '1g',
         'spark.executor.cores': '2',
@@ -48,11 +48,11 @@ daily_summary = SparkSubmitOperator(
 # 价格趋势分析任务
 trend_analysis = SparkSubmitOperator(
     task_id='trend_analysis',
-    application='/path/to/hadoop/spark/jobs/price_analysis.py',
+    application='/app/spark/jobs/price_analysis.py',
     application_args=['trend', '{{ ds }}'],
     conn_id='spark_default',
     conf={
-        'spark.master': 'yarn',
+        'spark.master': 'spark://spark-master:7077',
         'spark.executor.memory': '2g',
         'spark.driver.memory': '1g',
         'spark.executor.cores': '2',
@@ -63,11 +63,11 @@ trend_analysis = SparkSubmitOperator(
 # 价格预警检测任务
 alert_detection = SparkSubmitOperator(
     task_id='alert_detection',
-    application='/path/to/hadoop/spark/jobs/alert_detection.py',
+    application='/app/spark/jobs/alert_detection.py',
     application_args=['single', '{{ ds }}'],
     conn_id='spark_default',
     conf={
-        'spark.master': 'yarn',
+        'spark.master': 'spark://spark-master:7077',
         'spark.executor.memory': '2g',
         'spark.driver.memory': '1g',
         'spark.executor.cores': '2',

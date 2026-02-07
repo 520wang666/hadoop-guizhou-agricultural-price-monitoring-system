@@ -31,11 +31,11 @@ dag = DAG(
 # 批量预测任务
 batch_prediction = SparkSubmitOperator(
     task_id='batch_prediction',
-    application='/path/to/hadoop/spark/jobs/prediction.py',
+    application='/app/spark/jobs/prediction.py',
     application_args=['batch', '7'],  # 预测未来7天
     conn_id='spark_default',
     conf={
-        'spark.master': 'yarn',
+        'spark.master': 'spark://spark-master:7077',
         'spark.executor.memory': '4g',
         'spark.driver.memory': '2g',
         'spark.executor.cores': '4',

@@ -32,28 +32,29 @@ dag = DAG(
 # 电商平台爬虫任务
 ecommerce_crawler = BashOperator(
     task_id='ecommerce_crawler',
-    bash_command='cd /path/to/crawler/scrapy_crawler && scrapy crawl ecommerce_spider',
+    bash_command='cd /app/crawler/scrapy_crawler && scrapy crawl ecommerce_spider',
     dag=dag,
 )
 
 # 农业信息网爬虫任务
 agriculture_crawler = BashOperator(
     task_id='agriculture_crawler',
-    bash_command='cd /path/to/crawler/scrapy_crawler && scrapy crawl agriculture_spider',
+    bash_command='cd /app/crawler/scrapy_crawler && scrapy crawl agriculture_spider',
     dag=dag,
 )
 
 # 批发市场爬虫任务
 market_crawler = BashOperator(
     task_id='market_crawler',
-    bash_command='cd /path/to/crawler/scrapy_crawler && scrapy crawl market_spider',
+    bash_command='cd /app/crawler/scrapy_crawler && scrapy crawl market_spider',
     dag=dag,
 )
 
 # 数据清洗任务
+# 注意：数据清洗功能由 scrapy pipelines 处理，此处为数据后处理任务
 data_cleaning = BashOperator(
     task_id='data_cleaning',
-    bash_command='python /path/to/crawler/data_cleaner/cleaner.py',
+    bash_command='python /app/crawler/scrapy_crawler/process_output.py',
     dag=dag,
 )
 
