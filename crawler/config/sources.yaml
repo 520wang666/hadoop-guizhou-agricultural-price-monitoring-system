@@ -1,0 +1,128 @@
+# 数据源配置文件
+
+# 电商平台数据源
+ecommerce:
+  - name: 淘宝
+    base_url: https://www.taobao.com
+    search_url: https://s.taobao.com/search
+    enabled: true
+    rate_limit: 3  # 每秒请求数
+    selectors:
+      product_list: .J_MouserOnSuggestItem
+      product_name: .J_MouserOnSuggestItem .title::text
+      price: .J_MouserOnSuggestItem .price::text
+      detail_url: .J_MouserOnSuggestItem a::attr(href)
+  
+  - name: 京东
+    base_url: https://www.jd.com
+    search_url: https://search.jd.com/Search
+    enabled: true
+    rate_limit: 3
+    selectors:
+      product_list: .gl-item
+      product_name: .gl-item .p-name::text
+      price: .gl-item .p-price::text
+      detail_url: .gl-item .p-name a::attr(href)
+  
+  - name: 拼多多
+    base_url: https://www.pinduoduo.com
+    search_url: https://search.pinduoduo.com/search
+    enabled: false
+    rate_limit: 2
+    selectors:
+      product_list: .item
+      product_name: .item .goods-name::text
+      price: .item .goods-price::text
+      detail_url: .item a::attr(href)
+
+# 农业信息网数据源
+agriculture:
+  - name: 贵州省农业农村厅
+    base_url: https://agri.guizhou.gov.cn
+    price_url: https://agri.guizhou.gov.cn/price/list
+    enabled: true
+    rate_limit: 2
+    selectors:
+      price_list: .price-item
+      product_name: .product-name::text
+      category: .category::text
+      wholesale_price: .wholesale-price::text
+      retail_price: .retail-price::text
+      market_name: .market-name::text
+      region: .region::text
+      trade_date: .trade-date::text
+  
+  - name: 农业农村部
+    base_url: https://www.mara.gov.cn
+    price_url: https://www.mara.gov.cn/price/list
+    enabled: true
+    rate_limit: 2
+    selectors:
+      price_list: .price-row
+      product_name: .product::text
+      category: .type::text
+      wholesale_price: .price::text
+      market_name: .market::text
+      region: .area::text
+      trade_date: .date::text
+
+# 批发市场数据源
+market:
+  - name: 新发地
+    base_url: https://www.xinfadi.com.cn
+    price_url: https://www.xinfadi.com.cn/priceList
+    enabled: true
+    rate_limit: 2
+    selectors:
+      price_list: .price-row
+      product_name: .product-name::text
+      category: .category::text
+      spec: .spec::text
+      unit: .unit::text
+      wholesale_price: .wholesale-price::text
+      retail_price: .retail-price::text
+      highest_price: .highest-price::text
+      lowest_price: .lowest-price::text
+      market_name: .market-name::text
+      market_type: .market-type::text
+      region: .region::text
+      address: .address::text
+      latitude: .latitude::text
+      longitude: .longitude::text
+      trade_volume: .trade-volume::text
+      trade_date: .trade-date::text
+  
+  - name: 贵阳农产品批发市场
+    base_url: https://www.gyagri.gov.cn
+    price_url: https://www.gyagri.gov.cn/price
+    enabled: true
+    rate_limit: 2
+    selectors:
+      price_list: .price-item
+      product_name: .product-name::text
+      category: .category::text
+      wholesale_price: .price::text
+      market_name: .market::text
+      region: .region::text
+      trade_date: .date::text
+
+# 爬虫调度配置
+schedule:
+  # 电商平台爬虫
+  ecommerce:
+    enabled: true
+    cron: "0 */6 * * *"  # 每6小时执行一次
+    keywords:
+      - 贵州农产品
+      - 贵州蔬菜
+      - 贵州水果
+  
+  # 农业信息网爬虫
+  agriculture:
+    enabled: true
+    cron: "0 8 * * *"  # 每天8点执行
+  
+  # 批发市场爬虫
+  market:
+    enabled: true
+    cron: "0 9 * * *"  # 每天9点执行
